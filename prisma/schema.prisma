@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role { STUDENT TEACHER }
+enum FitnessLevel { BEGINNER INTERMEDIATE ADVANCED }
+enum Goal { ACTIVE STRENGTH ENDURANCE }
+enum WorkoutSource { CAMERA DEMO }
+enum ChallengeScope { INDIVIDUAL TEAM }
+enum ChallengeKind { DAILY WEEKLY SPECIAL }
+enum ChallengeMetric { WORKOUTS REPS ACTIVE_DAYS MINUTES }
+enum LedgerReason { WORKOUT DAILY_BONUS CHALLENGE }
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?
+  role          Role     @default(STUDENT)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  profile       Profile?
+  membership    TeamMembership?
+  workouts      WorkoutSession[]
+  participations ChallengeParticipation[]
+  ledger        PointsLedgerEntry[]
+  dailyGoals    DailyGoal[]
+}
+
+model Profile {
+  id            String       @id @default(cuid())
+  userId        String       @unique
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName   String
+  level         FitnessLevel @default(BEGINNER)
+  goal          Goal         @default(ACTIVE)
+  dailyGoalMin  Int          @default(10)
+  waterTargetMl Int          @default(2000)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  grade       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  members     TeamMembership[]
+  ledger      PointsLedgerEntry[]
+}
+
+model TeamMembership {
+  id        String   @id @default(cuid())
+  userId    String   @unique // one active team per user
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([teamId])
+}
+
+model Exercise {
+  id          String   @id // slug, e.g. "squat"
+  name        String
+  trackable   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workouts    WorkoutSession[]
+}
+
+model WorkoutSession {
+  id          String        @id @default(cuid())
+  /// Client-generated idempotency id; unique per user so retries cannot duplicate a workout.
+  clientId    String
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exerciseId  String
+  exercise    Exercise      @relation(fields: [exerciseId], references: [id])
+  startedAt   DateTime
+  durationSec Int
+  reps        Int
+  holdSec     Int
+  source      WorkoutSource
+  completed   Boolean
+  points      Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  @@unique([userId, clientId])
+  @@index([userId, startedAt])
+}
+
+model Challenge {
+  id            String          @id @default(cuid())
+  title         String
+  description   String
+  kind          ChallengeKind
+  scope         ChallengeScope
+  metric        ChallengeMetric
+  exerciseId    String?
+  target        Int
+  rewardPoints  Int
+  startsAt      DateTime
+  endsAt        DateTime
+  closed        Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  participations ChallengeParticipation[]
+}
+
+model ChallengeParticipation {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challengeId String
+  challenge   Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  joinedAt    DateTime  @default(now())
+  rewardedAt  DateTime?
+  @@unique([userId, challengeId])
+}
+
+model PointsLedgerEntry {
+  id        String       @id @default(cuid())
+  /// Idempotency key (e.g. "workout:<id>", "daily:<user>:<day>", "challenge:<id>:<user>"). UNIQUE prevents double awards.
+  key       String       @unique
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId    String?
+  team      Team?        @relation(fields: [teamId], references: [id])
+  points    Int
+  reason    LedgerReason
+  refId     String
+  createdAt DateTime     @default(now())
+  @@index([userId, createdAt])
+  @@index([teamId, createdAt])
+}
+
+model DailyGoal {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day       String   // YYYY-MM-DD in Asia/Tashkent
+  waterMl   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([userId, day])
+}
